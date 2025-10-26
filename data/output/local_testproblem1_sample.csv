@@ -1,0 +1,4 @@
+log_entry,log_level
+"17/03/29 10:11:18 INFO executor.CoarseGrainedExecutorBackend: Got assigned task 102",INFO
+"17/03/29 10:02:41 INFO spark.SecurityManager: Changing view acls to: yarn,curi",INFO
+"17/03/29 10:02:07 INFO storage.MemoryStore: MemoryStore started with capacity 17.7 GB",INFO

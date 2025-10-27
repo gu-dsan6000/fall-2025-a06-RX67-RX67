@@ -10,11 +10,11 @@ Outputs:
 3. data/output/problem1_summary.txt -> summary statistics
 """
 
-from pyspark.sql import SparkSession
+from pyspark.sql import SparkSession, Row
 from pyspark.sql.functions import (
-    col, regexp_extract, input_file_name, to_timestamp
+    col, regexp_extract, input_file_name, to_timestamp, try_to_timestamp, lit
 )
-from pathlib import Path
+
 import argparse
 
 # spark Session Helper
@@ -48,14 +48,14 @@ def run_problem1(input_path: str, output_dir: str, master_url: str = None):
     )
 
     print(f"Reading logs recursively from: {input_path}")
-    logs_df = spark.read.text(input_path).withColumn("file_path", input_file_name())
+    logs_df = spark.read.text(f"{input_path.rstrip('/')}/*/**").withColumn("file_path", input_file_name())
     total_lines = logs_df.count()
     print(f"Total lines read: {total_lines:,}")
 
     # filter out system messages (not starting with timestamp)
-    logs_df = logs_df.filter(col("value").rlike(r"^\d{2}/\d{2}/\d{2} \d{2}:\d{2}:\d{2}"))
-    total_lines_filtered = logs_df.count()
-    print(f"Total lines read after filtering: {total_lines_filtered:,}")
+    # logs_df = logs_df.filter(col("value").rlike(r"^\d{2}/\d{2}/\d{2} \d{2}:\d{2}:\d{2}"))
+    # total_lines_filtered = logs_df.count()
+    # print(f"Total lines read after filtering: {total_lines_filtered:,}")
 
     # parse using regexp_extract
     logs_parsed = logs_df.select(
@@ -68,18 +68,22 @@ def run_problem1(input_path: str, output_dir: str, master_url: str = None):
 
     # clean and handle timestamp(make string to time)
     logs_parsed = logs_parsed.withColumn(
-        "timestamp", to_timestamp("timestamp", "yy/MM/dd HH:mm:ss")
+        "timestamp", try_to_timestamp(col("timestamp"), lit("yy/MM/dd HH:mm:ss"))
     )
 
     # filter valid log levels
-    logs_valid = logs_parsed.filter(col("log_level").isNotNull() & (col("log_level") != ""))
+    logs_valid = logs_parsed.filter(
+        col("log_level").isNotNull() & 
+        (col("log_level") != "") & 
+        col("timestamp").isNotNull()
+    )
     logs_valid.cache()  # optimization
     valid_lines = logs_valid.count()
     print(f"Lines with valid log levels: {valid_lines:,}")
 
     # count per log level
     counts_df = logs_valid.groupBy("log_level").count().orderBy(col("count").desc())
-    counts_path = str(Path(output_dir) / "problem1_counts.csv")
+    counts_path = f"{output_dir.rstrip('/')}/problem1_counts.csv"
     counts_df.coalesce(1).write.csv(counts_path, header=True, mode="overwrite")
     print(f"Saved counts to {counts_path}")
 
@@ -91,7 +95,7 @@ def run_problem1(input_path: str, output_dir: str, master_url: str = None):
         col("log_level")
     )
 
-    sample_path = str(Path(output_dir) / "problem1_sample.csv")
+    sample_path = f"{output_dir.rstrip('/')}/problem1_sample.csv"
     sample_df.coalesce(1).write.csv(sample_path, header=True, mode="overwrite")
     print(f"Saved 10 sample logs to {sample_path}")
 
@@ -110,11 +114,9 @@ def run_problem1(input_path: str, output_dir: str, master_url: str = None):
         pct = row["count"] / total_with_levels * 100
         summary_lines.append(f"  {row['log_level']:<7}: {row['count']:>10,} ({pct:5.2f}%)")
 
-    Path(output_dir).mkdir(parents=True, exist_ok=True)
-    summary_path = str(Path(output_dir) / "problem1_summary.txt")
-    with open(summary_path, "w") as f:
-        f.write("\n".join(summary_lines))
-    print(f"Saved summary to {summary_path}")
+    summary_df = spark.createDataFrame([Row(line=l) for l in summary_lines])
+    summary_df.coalesce(1).write.mode("overwrite").text(f"{output_dir.rstrip('/')}/problem1_summary")
+    print(f"Saved summary to {output_dir.rstrip('/')}/problem1_summary/")
 
     spark.stop()
     print("Problem 1 completed successfully.")
